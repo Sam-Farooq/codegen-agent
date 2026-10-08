@@ -1,0 +1,25 @@
+[project]
+name = "codegen-agent"
+version = "0.6.2"
+description = "Plan, write, run, repair. A LangGraph loop that only stops when pytest passes."
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2.28",
+    "langchain-core>=0.3.0",
+    "langchain-anthropic>=0.2.0",
+    "langchain-openai>=0.2.0",
+    "docker>=7.1.0",
+    "motor>=3.6.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3.0", "pytest-asyncio>=0.24.0", "ruff==0.16.10"]
+
+[tool.ruff]
+line-length = 100
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
