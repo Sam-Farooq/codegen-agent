@@ -1,0 +1,24 @@
+services:
+  mongo:
+    image: mongo:7
+    ports: ["27017:27017"]
+    volumes: ["mongo:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      retries: 5
+
+  api:
+    build: .
+    ports: ["8000:8000"]
+    env_file: [.env]
+    environment:
+      CG_MONGO_URI: mongodb://mongo:27017
+    # Sibling containers through the host daemon rather than docker-in-docker.
+    # dind needs a privileged container, which is worse than what it protects.
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    depends_on:
+      mongo: {condition: service_healthy}
+
+volumes:
+  mongo:
