@@ -44,8 +44,9 @@ class RunStore:
                 "exit_code": run.exit_code,
                 "timed_out": run.timed_out,
                 "duration_s": run.duration_s,
-                # First 2k only. Storing the whole pytest dump for every round
-                # of every run grew the collection to 4GB in a fortnight.
+                # First 2k only. A full pytest dump is tens of kilobytes and
+                # there is one per round per run, so untruncated it outgrows
+                # everything else in the collection.
                 "stdout_head": run.stdout[:2000],
             }}},
         )

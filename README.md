@@ -27,10 +27,10 @@ and the timeout fires instead, which reads as a completely different bug.
 
 ## Two models, deliberately
 
-The coder is Claude and the critic is GPT-4o. Same-model review agrees with
-itself far too readily: across the first forty runs with one model on both
-ends, the critic approved 38 of its own coder's diffs, and 9 of those failed
-the very next test run.
+The coder is Claude and the critic is GPT-4o. A model reviewing its own
+output is scoring text from the distribution it just sampled, so whatever it
+was blind to as a writer it is equally blind to as a reader. A different
+family does not fix that. It makes the blind spots less likely to coincide.
 
 The critic only sees code that already passes, so passing is not the question
 it is asked. It is told that finding nothing is a normal outcome, because a

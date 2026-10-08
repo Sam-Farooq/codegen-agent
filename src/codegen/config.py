@@ -8,9 +8,9 @@ class Settings(BaseSettings):
 
     planner_model: str = "claude-sonnet-4-5"
     coder_model: str = "claude-sonnet-4-5"
-    # A different family for the critic. Same-model review agrees with itself
-    # far too readily: on the first 40 runs the critic approved 38 of its own
-    # coder's diffs, and 9 of those failed the very next test run.
+    # A different family for the critic. A model reviewing its own output is
+    # blind as a reader to whatever it was blind to as a writer, so a second
+    # family at least makes the blind spots less likely to coincide.
     critic_model: str = "gpt-4o"
 
     max_repair_rounds: int = 4
