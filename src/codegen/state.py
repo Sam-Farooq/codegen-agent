@@ -29,6 +29,15 @@ class SuiteRun(BaseModel):
     timed_out: bool = False
 
 
+class LintReport(BaseModel):
+    clean: bool
+    findings: str = ""
+    count: int = 0
+    # False when ruff could not be run at all. Such a report is clean: a
+    # linter that is missing must not stop a run the container could pass.
+    available: bool = True
+
+
 class Critique(BaseModel):
     approved: bool
     blocking: list[str] = Field(default_factory=list)
@@ -42,6 +51,7 @@ class RunState(TypedDict, total=False):
     files: list[FileEdit]
     last_run: SuiteRun
     history: list[SuiteRun]
+    lint: LintReport
     critique: Critique
     round: int
     outcome: Literal["passed", "exhausted", "rejected"]
