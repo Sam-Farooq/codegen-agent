@@ -1,8 +1,12 @@
 """The loop.
 
-    plan -> code -> test -> (pass?) -> critique -> (approved?) -> done
-                      ^                    |              |
-                      └──── repair ────────┘              └── repair
+    plan -> write -> lint -> test -> (pass?) -> critique -> (approved?) -> done
+                       ^                |                        |
+                       └──── repair ────┴────────────────────────┘
+
+Three things route to repair: a lint finding, a failed suite, and a blocking
+critique. Repair goes back to lint rather than straight to test, so a fix that
+introduces a parse error is caught before the next container starts.
 
 Two exits that are not success: `exhausted` when the repair budget runs out,
 and `rejected` when the critic blocks and there is no budget left to act on
@@ -13,10 +17,12 @@ from __future__ import annotations
 
 import logging
 
+from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, StateGraph
 
-from codegen.agents.prompts import CODER, CRITIC, PLANNER, REPAIR
+from codegen.agents.prompts import CODER, CRITIC, LINT_REPAIR, PLANNER, REPAIR
 from codegen.config import get_settings
+from codegen.lint import Linter
 from codegen.sandbox.runner import Sandbox
 from codegen.state import Critique, FileEdit, Plan, RunState
 
@@ -35,12 +41,39 @@ def _merge(existing: list[FileEdit], incoming: list[FileEdit]) -> list[FileEdit]
     return list(by_path.values())
 
 
+def _repair_inputs(state: RunState, max_rounds: int) -> tuple[ChatPromptTemplate, dict]:
+    """Which failure this repair round is shown.
+
+    A lint finding arrives before any container has run, so there is no exit
+    code to quote and `last_run` may not exist at all. Routing guarantees only
+    one of the two is outstanding: a dirty report reaches repair only while
+    budget remains, and once the budget is gone a dirty report goes to the
+    container instead, so repair is never entered from test with lint findings
+    still open.
+    """
+    common = {
+        "task": state["task"],
+        "files": _render(state["files"]),
+        "round": state["round"] + 1,
+        "max_rounds": max_rounds,
+    }
+
+    report = state.get("lint")
+    if report is not None and not report.clean:
+        return LINT_REPAIR, {**common, "findings": report.findings, "count": report.count}
+
+    run = state["last_run"]
+    return REPAIR, {**common, "exit_code": run.exit_code,
+                    "stdout": run.stdout, "stderr": run.stderr}
+
+
 class Nodes:
-    def __init__(self, planner, coder, critic, sandbox: Sandbox):
+    def __init__(self, planner, coder, critic, sandbox: Sandbox, linter: Linter | None = None):
         self.planner = planner
         self.coder = coder
         self.critic = critic
         self.sandbox = sandbox
+        self.linter = linter or Linter()
         self.cfg = get_settings()
 
     async def plan(self, state: RunState) -> RunState:
@@ -54,6 +87,12 @@ class Nodes:
         )
         return {"files": files}
 
+    async def lint(self, state: RunState) -> RunState:
+        report = await self.linter.check(state["files"])
+        log.info("round=%s lint_findings=%s available=%s",
+                 state.get("round", 0), report.count, report.available)
+        return {"lint": report}
+
     async def test(self, state: RunState) -> RunState:
         run = await self.sandbox.run_tests(state["files"])
         log.info("round=%s passed=%s exit=%s %.1fs",
@@ -61,17 +100,9 @@ class Nodes:
         return {"last_run": run, "history": [*state.get("history", []), run]}
 
     async def repair(self, state: RunState) -> RunState:
-        run = state["last_run"]
-        chain = REPAIR | self.coder.with_structured_output(list[FileEdit])
-        changed = await chain.ainvoke({
-            "task": state["task"],
-            "files": _render(state["files"]),
-            "exit_code": run.exit_code,
-            "stdout": run.stdout,
-            "stderr": run.stderr,
-            "round": state["round"] + 1,
-            "max_rounds": self.cfg.max_repair_rounds,
-        })
+        prompt, inputs = _repair_inputs(state, self.cfg.max_repair_rounds)
+        chain = prompt | self.coder.with_structured_output(list[FileEdit])
+        changed = await chain.ainvoke(inputs)
         return {"files": _merge(state["files"], changed), "round": state["round"] + 1}
 
     async def review(self, state: RunState) -> RunState:
@@ -91,6 +122,15 @@ class Nodes:
         return {"outcome": "exhausted"}
 
 
+def after_lint(state: RunState) -> str:
+    if state["lint"].clean:
+        return "test"
+    # Out of budget, so the container runs anyway. The findings are real, but
+    # finishing here would report an outcome no suite ever produced, and the
+    # repair rounds are what cost money, not the container.
+    return "repair" if state["round"] < get_settings().max_repair_rounds else "test"
+
+
 def after_test(state: RunState) -> str:
     if state["last_run"].passed:
         return "review"
@@ -105,15 +145,16 @@ def after_review(state: RunState) -> str:
 
 def build(nodes: Nodes):
     g = StateGraph(RunState)
-    for name in ("plan", "write", "test", "repair", "review", "finish"):
-        g.add_node(name, getattr(nodes, name if name != "write" else "write"))
+    for name in ("plan", "write", "lint", "test", "repair", "review", "finish"):
+        g.add_node(name, getattr(nodes, name))
 
     g.set_entry_point("plan")
     g.add_edge("plan", "write")
-    g.add_edge("write", "test")
+    g.add_edge("write", "lint")
+    g.add_conditional_edges("lint", after_lint, {"test": "test", "repair": "repair"})
+    g.add_edge("repair", "lint")
     g.add_conditional_edges("test", after_test,
                             {"review": "review", "repair": "repair", "finish": "finish"})
-    g.add_edge("repair", "test")
     g.add_conditional_edges("review", after_review, {"finish": "finish", "repair": "repair"})
     g.add_edge("finish", END)
     return g.compile()

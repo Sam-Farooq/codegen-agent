@@ -38,3 +38,21 @@ CRITIC = ChatPromptTemplate.from_messages([
       "Do not block on style. Returning no blocking items is a normal outcome.")),
     ("human", "Task:\n{task}\n\nFiles:\n{files}\n\nEdge cases the plan named:\n{edge_cases}"),
 ])
+
+# A lint finding arrives before any suite has run, so the repair round cannot
+# be shown an exit code and must not be told the tests failed.
+LINT_REPAIR = ChatPromptTemplate.from_messages([
+    ("system",
+     ("Static analysis found problems that will end the test run before a "
+      "single test executes. No suite has run yet.\n\n"
+      "Each finding is file:line:column, then the rule, then the message. Fix "
+      "the cause at that line and return the full contents of only the files "
+      "that need to change.\n\n"
+      "Do not suppress a finding with a comment; the checker ignores those and "
+      "Python ignores them too. Do not restructure anything the findings do "
+      "not name.")),
+    ("human",
+     ("Task:\n{task}\n\nCurrent files:\n{files}\n\n"
+      "ruff reported {count} problems:\n{findings}\n\n"
+      "Attempt {round} of {max_rounds}.")),
+])
