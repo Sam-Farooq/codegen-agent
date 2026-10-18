@@ -4,9 +4,11 @@ Give it a task. It plans, writes the files, runs pytest in a throwaway
 container, reads the failure, and tries again. It stops when the tests pass
 and a second model has reviewed the result, or when the repair budget runs out.
 
-    plan -> write -> test -> pass? -> review -> approved? -> done
-                       ^       |                   |
-                       +-- repair <----------------+
+    plan -> write -> lint -> test -> pass? -> review -> approved? -> done
+                       ^               |                    |
+                       +-- repair <----+--------------------+
+
+A ruff finding routes to repair as well, before any container starts.
 
 Two exits are not success. "exhausted" means the budget ran out with tests
 still red. "rejected" means they went green but the critic blocked and there
@@ -24,6 +26,34 @@ nobody. Two are worth calling out. pids_limit is the one people leave off, and
 a fork bomb is an ordinary thing for a confused model to emit. memswap_limit
 has to equal mem_limit, or the memory cap just pushes the process into swap
 and the timeout fires instead, which reads as a completely different bug.
+
+## Ruff before the container
+
+A file that will not parse does not need a container to say so. The expensive
+step in a round is the sandbox: an image check, a fresh container, a tar in, a
+pytest start. So each file set is written to a temporary directory and checked
+with ruff first, and a finding becomes a repair round that costs no container
+at all. The test that counts starts for a run whose first draft does not parse
+is in tests/test_lint_gate.py: the count was 2, and it is 1.
+
+The rule selection is the decision that matters. Only invalid-syntax, F821,
+F822 and F823 are on, the four that name something Python will not resolve
+when it reaches that line. Ruff's defaults also report unused and unsorted
+imports, and a repair round spent deleting an unused import pays a model call
+for a container start that would have passed.
+
+Two smaller ones. noqa comments are ignored, because a repair round can write
+`# noqa: F821` and clear the gate without changing anything Python does. And a
+ruff that cannot be run reports clean, so the container still decides; the gate
+is only allowed to say early what the suite would have said anyway.
+
+A lint round spends a repair round, which bounds the gate: findings that four
+repairs cannot fix go to the container, and the ordinary exhausted exit
+applies. The files are written to the host for ruff to read, and that is the
+one place a generated filename meets a real filesystem. `Path("/tmp/work") /
+"/etc/passwd"` is `/etc/passwd`, so every path is resolved against the work
+directory first and one that escapes is reported to the repair round instead
+of being written.
 
 ## Two models, deliberately
 
@@ -49,7 +79,5 @@ rewording did.
 - The critic sees the current files, never the history. For a task that
   oscillates between two wrong answers, the history is the only thing that
   would reveal it.
-- No static analysis before execution. Running ruff over the generated files
-  first would catch a class of failure without paying for a container start.
 - /runs returns immediately and runs the work in a background task, so a
   restart loses anything in flight. This wants a real queue.

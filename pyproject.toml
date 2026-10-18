@@ -14,10 +14,14 @@ dependencies = [
     "uvicorn>=0.30.0",
     "pydantic>=2.8.0",
     "pydantic-settings>=2.4.0",
+    # Runtime, not a dev tool: the loop runs ruff over generated files before
+    # it starts a container. Pinned because the gate selects rules by code and
+    # reads the concise output format.
+    "ruff==0.16.10",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==9.1.1", "pytest-asyncio==1.4.0", "ruff==0.16.10"]
+dev = ["pytest==9.1.1", "pytest-asyncio==1.4.0"]
 
 [tool.ruff]
 line-length = 100
